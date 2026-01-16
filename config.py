@@ -1,0 +1,7 @@
+DEEPSEEK_API_KEY = "sk-91924f12d5744f1d9de4c7cdf134d675"
+
+MODEL_NAME = "deepseek-chat"
+
+MAX_TOKENS = 800
+
+TEMPERATURE = 0.2

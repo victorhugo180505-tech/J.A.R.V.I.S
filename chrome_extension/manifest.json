@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Jarvis YouTube Control",
+  "version": "1.0.0",
+  "permissions": ["tabs", "activeTab", "scripting", "nativeMessaging"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://music.youtube.com/*",
+    "https://m.youtube.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://m.youtube.com/*"
+      ],
+      "js": ["youtube_content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

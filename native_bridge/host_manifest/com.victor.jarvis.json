@@ -1,0 +1,9 @@
+{
+  "name": "com.victor.jarvis",
+  "description": "Jarvis Native Bridge",
+  "path": "C:\\Users\\victo\\source\\J.A.R.V.I.S\\native_bridge\\dist\\jarvis_native_host.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://jepofnnfmoihmhjcopcdpnnilmmnamch/"
+  ]
+}
