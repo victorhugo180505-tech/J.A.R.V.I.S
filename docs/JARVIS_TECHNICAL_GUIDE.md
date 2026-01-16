@@ -105,6 +105,7 @@
 **Objetivo**: JARVIS se activa al escuchar una frase.
 
 **Propuesta**
+- Frase activadora definida: **“Oye JARVIS”** (pronunciado “yarbis”).
 - Motor wake word local (ej. Porcupine u otro lightweight local).
 - Solo despierta el pipeline de STT cuando detecta frase.
 
@@ -115,6 +116,12 @@
 - Estado global `vision_enabled` y `audio_enabled`.
 - UI (web o Tauri) con botones de toggle.
 - Orquestador verifica estos estados antes de capturar o procesar audio/vision.
+
+### 3.6 TTS local y gratuito
+**Objetivo**: usar TTS gratuito sin depender de servicios pagos.
+
+**Propuesta**
+- Motor TTS local (ej. Piper u otro motor offline).
 
 ---
 

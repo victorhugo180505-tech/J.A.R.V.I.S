@@ -4,6 +4,8 @@ from core.parser import parse_response
 from actions.dispatcher import dispatch_action
 
 from jarvis_avatar_web.server.avatar_ws_client import AvatarWSClient
+from core.control_server import ControlServer
+from core.state import state
 
 # ===============================
 # Azure Speech (DEV LOCAL)
@@ -79,6 +81,8 @@ def have_azure_config() -> bool:
 
 avatar = AvatarWSClient("ws://127.0.0.1:8765")
 avatar.start()
+control_server = ControlServer(state)
+control_server.start()
 
 print("Jarvis iniciado. Escribe 'salir' para terminar.")
 
@@ -165,3 +169,4 @@ try:
 
 finally:
     avatar.stop()
+    control_server.stop()
