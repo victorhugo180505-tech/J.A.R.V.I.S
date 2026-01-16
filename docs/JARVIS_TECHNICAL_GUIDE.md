@@ -114,7 +114,7 @@
 
 **Implementación**
 - Estado global `vision_enabled` y `audio_enabled`.
-- UI (web o Tauri) con botones de toggle.
+- UI (web o Tauri) con botones de toggle (Tauri ya llama al control server local).
 - Orquestador verifica estos estados antes de capturar o procesar audio/vision.
 
 ### 3.6 TTS local y gratuito

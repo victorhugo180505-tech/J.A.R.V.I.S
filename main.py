@@ -4,6 +4,7 @@ from core.parser import parse_response
 from actions.dispatcher import dispatch_action
 
 from jarvis_avatar_web.server.avatar_ws_client import AvatarWSClient
+from jarvis_avatar_web.server import mouse_stream
 from jarvis_avatar_web.server import ws_server as avatar_ws_server
 from native_bridge import http_bridge
 from core.control_server import ControlServer
@@ -98,6 +99,12 @@ def start_local_servers():
         stop_handles.pop("http_bridge", None)
         print(f"⚠️ No se pudo iniciar HTTP bridge: {exc}")
 
+    try:
+        stop_handles["mouse_stream"] = mouse_stream.start_mouse_stream_in_thread()
+        print("✔ Mouse listener iniciado desde main.py")
+    except Exception as exc:
+        print(f"⚠️ No se pudo iniciar mouse listener: {exc}")
+
     return stop_handles
 
 def stop_local_servers(stop_handles):
@@ -108,6 +115,10 @@ def stop_local_servers(stop_handles):
     stop_event = stop_handles.get("avatar_ws")
     if stop_event:
         stop_event.set()
+
+    mouse_stop = stop_handles.get("mouse_stream")
+    if mouse_stop:
+        mouse_stop.set()
 
 server_handles = start_local_servers()
 
