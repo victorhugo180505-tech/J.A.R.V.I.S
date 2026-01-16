@@ -19,10 +19,10 @@
 - `actions/youtube_ext.py` usa HTTP bridge local en `127.0.0.1:8766/command` para controlar YouTube vía extensión de Chrome.【F:actions/youtube_ext.py†L1-L32】
 
 ### 1.4 Avatar + WS
-- `jarvis_avatar_web/server/ws_server.py` es el hub WS para emoción/estado/mensajes del avatar.【F:jarvis_avatar_web/server/ws_server.py†L1-L120】
+- `jarvis_avatar_web/server/ws_server.py` es el hub WS para emoción/estado/mensajes del avatar y puede iniciarse en background desde `main.py` para evitar pasos manuales.【F:jarvis_avatar_web/server/ws_server.py†L1-L145】
 
 ### 1.5 Bridge con Chrome
-- `native_bridge/http_bridge.py` expone `/command` para enviar JSON a la extensión (Native Messaging).【F:native_bridge/http_bridge.py†L1-L63】
+- `native_bridge/http_bridge.py` expone `/command` para enviar JSON a la extensión (Native Messaging) y puede iniciarse desde `main.py` en el mismo arranque del asistente.【F:native_bridge/http_bridge.py†L1-L80】
 - `native_bridge/native_host.py` transmite payloads entre el bridge y el Chrome Extension.【F:native_bridge/native_host.py†L1-L130】
 
 ---

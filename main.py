@@ -4,6 +4,8 @@ from core.parser import parse_response
 from actions.dispatcher import dispatch_action
 
 from jarvis_avatar_web.server.avatar_ws_client import AvatarWSClient
+from jarvis_avatar_web.server import ws_server as avatar_ws_server
+from native_bridge import http_bridge
 from core.control_server import ControlServer
 from core.state import state
 
@@ -78,6 +80,36 @@ def normalize_emotion(e: str) -> str:
 
 def have_azure_config() -> bool:
     return bool((AZURE_KEY or "").strip()) and bool((AZURE_REGION or "").strip())
+
+def start_local_servers():
+    stop_handles = {}
+
+    try:
+        stop_handles["avatar_ws"] = avatar_ws_server.start_server_in_thread(with_console=False)
+        print("✔ Avatar WS server iniciado desde main.py")
+    except Exception as exc:
+        print(f"⚠️ No se pudo iniciar Avatar WS server: {exc}")
+
+    try:
+        stop_handles["http_bridge"] = http_bridge.HttpBridgeServer()
+        stop_handles["http_bridge"].start()
+        print("✔ HTTP bridge iniciado desde main.py")
+    except Exception as exc:
+        stop_handles.pop("http_bridge", None)
+        print(f"⚠️ No se pudo iniciar HTTP bridge: {exc}")
+
+    return stop_handles
+
+def stop_local_servers(stop_handles):
+    bridge = stop_handles.get("http_bridge")
+    if bridge:
+        bridge.stop()
+
+    stop_event = stop_handles.get("avatar_ws")
+    if stop_event:
+        stop_event.set()
+
+server_handles = start_local_servers()
 
 avatar = AvatarWSClient("ws://127.0.0.1:8765")
 avatar.start()
@@ -170,3 +202,4 @@ try:
 finally:
     avatar.stop()
     control_server.stop()
+    stop_local_servers(server_handles)
