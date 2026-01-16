@@ -207,7 +207,58 @@
 
 ---
 
-## 8) Riesgos y mitigaciones
+## 8) Qué puedo implementar ahora mismo vs. qué requiere tu intervención
+
+### Lo que puedo hacer por mi cuenta (sin tocar hardware ni credenciales)
+- Implementar el armazón de módulos:
+  - `core/audio_capture.py` (loopback de sistema con pausa/reanudar).
+  - `core/mic_input.py` (VAD + STT, con mute explícito).
+  - `core/vision_capture.py` (captura por monitor con toggle).
+- Crear endpoints locales (ej. `/vision/snapshot`, `/audio/toggle`, `/mic/toggle`) para controlar estados.
+- Añadir el estado global y flujos de “pausa audio” y “pausa visión”.
+- Integrar un bus interno para eventos (fast/deep brain) sin cambiar tu UX principal.
+
+### Lo que sí requiere tu intervención (por permisos o decisiones personales)
+- **Elegir tecnología de STT y wake word** (por privacidad/latencia):
+  - Local (recomendado para privacidad): Vosk/Whisper local + Porcupine.
+  - Cloud (más simple): APIs externas (necesitan claves).
+- **Permisos de audio y pantalla del SO** (Windows):
+  - Habilitar WASAPI loopback y permitir captura en segundo plano.
+  - Elegir si quieres capturar siempre o solo bajo demanda.
+- **Decidir política de privacidad**:
+  - ¿Guardar transcripciones? ¿Borrar automáticamente? ¿Ventana de retención?
+- **Definir frase de activación** (wake word).
+- **Confirmar apps sensibles** que jamás deben ser automatizadas.
+
+---
+
+## 9) Plan fase a fase (para probar evolución)
+
+### Fase 1 (ya puedo empezar): Infraestructura de audio/visión + toggles
+Objetivo: JARVIS ve/escucha **pero con switches de privacidad**.
+- Implementar módulos de captura con “pause/resume”.
+- Estados globales: `audio_enabled`, `vision_enabled`, `mic_enabled`.
+- Endpoints locales para toggles.
+
+**Tu intervención**: seleccionar STT y wake word.
+
+### Fase 2: Wake word + STT en tiempo real
+Objetivo: activar pipeline de voz solo tras la frase de activación.
+- Integrar motor wake word.
+- Activar VAD + STT solo cuando hay wake word.
+
+**Tu intervención**: definir frase de activación y política de privacidad.
+
+### Fase 3: Dual-brain + memoria
+Objetivo: respuestas inmediatas + razonamiento profundo con continuidad.
+- Implementar fast/deep brain con bus interno.
+- Persistir memoria episódica y semántica.
+
+**Tu intervención**: decidir qué datos guardar y por cuánto tiempo.
+
+---
+
+## 10) Riesgos y mitigaciones
 
 - **Latencia perceptible** → usar fillers + reacciones instantáneas.
 - **Privacidad** → toggles claros, por defecto “OFF”.
@@ -215,12 +266,12 @@
 
 ---
 
-## 9) Qué no hacer todavía
+## 11) Qué no hacer todavía
 - No habilitar grabación continua sin necesidad (privacidad).
 - No automatizar acciones destructivas sin confirmación.
 
 ---
 
-## 10) Conclusión
+## 12) Conclusión
 
 Con estas fases, JARVIS evoluciona de un bot conversacional a un asistente con presencia real, con visión y audio del entorno, controlable y seguro. El plan mantiene coherencia con el repo actual, expandiéndolo de forma incremental sin romper su flujo base.
