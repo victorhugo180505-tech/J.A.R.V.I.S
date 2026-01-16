@@ -7,6 +7,12 @@ import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 document.title = "JARVIS_AVATAR__5f3c9e";
 
 const canvas = document.getElementById("c");
+const statusEl = document.getElementById("control-status");
+const toggleMicBtn = document.getElementById("toggle-mic");
+const toggleAudioBtn = document.getElementById("toggle-audio");
+const toggleVisionBtn = document.getElementById("toggle-vision");
+
+const CONTROL_BASE = "http://127.0.0.1:8780";
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 
@@ -20,6 +26,45 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 const dir = new THREE.DirectionalLight(0xffffff, 1.4);
 dir.position.set(1, 2, 2);
 scene.add(dir);
+
+// -----------------------------
+// Control server UI
+// -----------------------------
+async function fetchJson(path, options = {}) {
+  const res = await fetch(`${CONTROL_BASE}${path}`, options);
+  if (!res.ok) {
+    throw new Error(`Control server error ${res.status}`);
+  }
+  return res.json();
+}
+
+async function refreshControlStatus() {
+  if (!statusEl) return;
+  try {
+    const state = await fetchJson("/state");
+    statusEl.textContent = `Mic: ${state.mic_enabled ? "ON" : "OFF"} · Audio: ${state.audio_enabled ? "ON" : "OFF"} · Visión: ${state.vision_enabled ? "ON" : "OFF"}`;
+  } catch (err) {
+    statusEl.textContent = "Control server offline";
+  }
+}
+
+async function bindToggle(button, path) {
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    try {
+      await fetchJson(path, { method: "POST" });
+    } catch (err) {
+      console.warn(err);
+    } finally {
+      refreshControlStatus();
+    }
+  });
+}
+
+bindToggle(toggleMicBtn, "/mic/toggle");
+bindToggle(toggleAudioBtn, "/audio/toggle");
+bindToggle(toggleVisionBtn, "/vision/toggle");
+refreshControlStatus();
 
 // -----------------------------
 // State

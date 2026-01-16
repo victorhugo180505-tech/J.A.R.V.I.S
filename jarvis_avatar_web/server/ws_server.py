@@ -1,4 +1,4 @@
-import asyncio, json, traceback, time
+import asyncio, json, threading, traceback, time
 import websockets
 
 HOST = "127.0.0.1"
@@ -127,7 +127,11 @@ async def console_loop():
 
         print("Usa: s <texto> | e <emocion> | m <x> <y> | salir")
 
-async def main():
+async def wait_for_stop(stop_event: threading.Event):
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, stop_event.wait)
+
+async def serve_ws(stop_event: threading.Event, with_console: bool = True):
     try:
         async with websockets.serve(
             handle_ws,
@@ -138,10 +142,23 @@ async def main():
             ping_timeout=20,
             close_timeout=5,
         ):
-            await console_loop()
+            if with_console:
+                await console_loop()
+            else:
+                await wait_for_stop(stop_event)
     except Exception:
         print("🔥 EXCEPCIÓN arrancando el servidor:")
         traceback.print_exc()
 
+def start_server_in_thread(with_console: bool = True):
+    stop_event = threading.Event()
+
+    def runner():
+        asyncio.run(serve_ws(stop_event, with_console=with_console))
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    return stop_event
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(serve_ws(threading.Event(), with_console=True))
