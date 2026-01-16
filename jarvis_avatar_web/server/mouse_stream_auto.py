@@ -1,4 +1,4 @@
-import asyncio, json, time, ctypes
+import asyncio, ctypes, json, threading, time
 import websockets
 import win32gui
 import win32api
@@ -108,7 +108,7 @@ def normalize_mouse_relative_to_window_center(mouse_pt, rc):
     ny = -dy / ry
     return clamp(nx, -1.0, 1.0), clamp(ny, -1.0, 1.0)
 
-async def connect_and_stream():
+async def connect_and_stream(stop_event: threading.Event):
     set_dpi_awareness()
 
     last_hwnd = None
@@ -116,12 +116,12 @@ async def connect_and_stream():
     last_dbg = 0.0
     tick = 1.0 / FPS
 
-    while True:
+    while not stop_event.is_set():
         try:
             async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=20) as ws:
                 print("✅ mouse_stream_auto conectado:", WS_URL)
 
-                while True:
+                while not stop_event.is_set():
                     hwnd, title = find_best_window_by_title_contains(AVATAR_TITLE_CONTAINS)
                     if hwnd is None:
                         await ws.send(json.dumps({"type": "mouse", "x": IDLE_NDC[0], "y": IDLE_NDC[1]}, ensure_ascii=False))
@@ -154,5 +154,15 @@ async def connect_and_stream():
             print("🔁 Reintentando en 1s...")
             await asyncio.sleep(1.0)
 
+def start_mouse_stream_in_thread():
+    stop_event = threading.Event()
+
+    def runner():
+        asyncio.run(connect_and_stream(stop_event))
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    return stop_event
+
 if __name__ == "__main__":
-    asyncio.run(connect_and_stream())
+    asyncio.run(connect_and_stream(threading.Event()))
