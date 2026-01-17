@@ -136,6 +136,7 @@ class WhisperListener:
 
     def _transcribe(self, audio) -> None:
         model = self._ensure_model()
+        segments = None
         try:
             segments, _info = model.transcribe(
                 audio,
@@ -143,6 +144,7 @@ class WhisperListener:
                 beam_size=1,
                 vad_filter=False,
             )
+            text = self._collect_text(segments)
         except RuntimeError as exc:
             message = str(exc)
             if "cublas" in message.lower() or "cuda" in message.lower():
@@ -157,6 +159,7 @@ class WhisperListener:
                         beam_size=1,
                         vad_filter=False,
                     )
+                    text = self._collect_text(segments)
                 except Exception:
                     return
             else:
@@ -164,6 +167,15 @@ class WhisperListener:
         except Exception:
             return
 
-        text = " ".join(seg.text.strip() for seg in segments if seg.text).strip()
         if text and self._callback:
             self._callback(text)
+
+    @staticmethod
+    def _collect_text(segments) -> str:
+        try:
+            return " ".join(seg.text.strip() for seg in segments if seg.text).strip()
+        except RuntimeError as exc:
+            message = str(exc)
+            if "cublas" in message.lower() or "cuda" in message.lower():
+                raise
+            return ""
