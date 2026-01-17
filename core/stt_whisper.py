@@ -50,11 +50,22 @@ class WhisperListener:
         if self._model is None:
             from faster_whisper import WhisperModel
 
-            self._model = WhisperModel(
-                self.config.model_size,
-                device=self.config.device,
-                compute_type=self.config.compute_type,
-            )
+            try:
+                self._model = WhisperModel(
+                    self.config.model_size,
+                    device=self.config.device,
+                    compute_type=self.config.compute_type,
+                )
+            except RuntimeError as exc:
+                message = str(exc)
+                if "cublas" in message.lower() or "cuda" in message.lower():
+                    self._model = WhisperModel(
+                        self.config.model_size,
+                        device="cpu",
+                        compute_type="int8",
+                    )
+                else:
+                    raise
         return self._model
 
     def _run(self) -> None:
