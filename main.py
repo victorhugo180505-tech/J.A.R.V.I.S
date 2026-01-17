@@ -1,4 +1,5 @@
 from ai.deepseek import ask_deepseek
+import re
 from core.memory import add_message, get_conversation
 from core.parser import parse_response
 from actions.dispatcher import dispatch_action
@@ -82,6 +83,14 @@ def normalize_emotion(e: str) -> str:
 def have_azure_config() -> bool:
     return bool((AZURE_KEY or "").strip()) and bool((AZURE_REGION or "").strip())
 
+def prepare_tts_text(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return text
+    text = re.sub(r"\bjarvis\b", "Yarvis", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bwow\b", "woooow", text, flags=re.IGNORECASE)
+    return text
+
 def start_local_servers():
     stop_handles = {}
 
@@ -154,6 +163,7 @@ try:
 
         emo = normalize_emotion(data.get("emotion", "neutral"))
         speech = (data.get("speech", "") or "").strip()
+        tts_text = prepare_tts_text(speech)
 
         add_message("assistant", speech)
         print(f"Jarvis ({emo}): {speech}")
@@ -163,12 +173,12 @@ try:
 
         # 2) TTS (Azure) -> WS type:"tts"
         #    Import LAZY para que NO truene el programa si falta el SDK / estás en otro Python.
-        if speech and have_azure_config():
+        if tts_text and have_azure_config():
             try:
                 from core.azure_tts import synthesize_tts_with_visemes
 
                 audio_b64, visemes = synthesize_tts_with_visemes(
-                    speech,
+                    tts_text,
                     key=AZURE_KEY,
                     region=AZURE_REGION,
                     voice=AZURE_VOICE
@@ -194,14 +204,14 @@ try:
 
             except Exception as e:
                 print("[AZURE] FAIL -> fallback say:", repr(e))
-                avatar.send_say(speech, emo)
+                avatar.send_say(tts_text, emo)
         else:
             # Sin texto o sin config Azure
-            if not speech:
+            if not tts_text:
                 print("[TTS] speech vacío -> no mando TTS.")
             elif not have_azure_config():
                 print("[TTS] falta AZURE_KEY/AZURE_REGION -> fallback say.")
-            avatar.send_say(speech, emo)
+            avatar.send_say(tts_text, emo)
 
         # 3) acción windows
         try:

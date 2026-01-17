@@ -4,9 +4,9 @@ from threading import Lock
 
 @dataclass
 class JarvisState:
-    audio_enabled: bool = True
-    mic_enabled: bool = True
-    vision_enabled: bool = True
+    audio_enabled: bool = False
+    mic_enabled: bool = False
+    vision_enabled: bool = False
     lock: Lock = field(default_factory=Lock, repr=False)
 
     def toggle_audio(self) -> bool:
