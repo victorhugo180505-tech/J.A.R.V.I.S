@@ -64,6 +64,8 @@ class WhisperListener:
                         device="cpu",
                         compute_type="int8",
                     )
+                    self.config.device = "cpu"
+                    self.config.compute_type = "int8"
                 else:
                     raise
         return self._model
@@ -141,6 +143,24 @@ class WhisperListener:
                 beam_size=1,
                 vad_filter=False,
             )
+        except RuntimeError as exc:
+            message = str(exc)
+            if "cublas" in message.lower() or "cuda" in message.lower():
+                self._model = None
+                self.config.device = "cpu"
+                self.config.compute_type = "int8"
+                model = self._ensure_model()
+                try:
+                    segments, _info = model.transcribe(
+                        audio,
+                        language=self.config.language,
+                        beam_size=1,
+                        vad_filter=False,
+                    )
+                except Exception:
+                    return
+            else:
+                return
         except Exception:
             return
 
