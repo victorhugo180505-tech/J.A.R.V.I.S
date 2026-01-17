@@ -204,14 +204,14 @@ try:
 
             except Exception as e:
                 print("[AZURE] FAIL -> fallback say:", repr(e))
-                avatar.send_say(tts_text, emo)
+                avatar.send_say(speech, emo)
         else:
             # Sin texto o sin config Azure
             if not tts_text:
                 print("[TTS] speech vacío -> no mando TTS.")
             elif not have_azure_config():
                 print("[TTS] falta AZURE_KEY/AZURE_REGION -> fallback say.")
-            avatar.send_say(tts_text, emo)
+            avatar.send_say(speech, emo)
 
         # 3) acción windows
         try:
