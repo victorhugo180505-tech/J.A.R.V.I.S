@@ -245,23 +245,31 @@ try:
     threading.Thread(target=stdin_worker, daemon=True).start()
 
     wake_word = "oye jarvis"
-    armed_until = 0.0
+    armed_until = {"value": 0.0}
+
+    def play_wake_beep():
+        try:
+            import winsound
+
+            winsound.Beep(880, 140)
+        except Exception:
+            return
 
     def on_transcript(text: str):
-        nonlocal armed_until
         cleaned = normalize_text(text).lower()
         if not cleaned:
             return
         now = time.time()
         if wake_word in cleaned:
             remainder = cleaned.replace(wake_word, "").strip(" ,.")
-            armed_until = now + 6.0
+            armed_until["value"] = now + 6.0
+            play_wake_beep()
             if remainder:
                 input_queue.put(remainder)
             return
-        if now <= armed_until:
+        if now <= armed_until["value"]:
             input_queue.put(cleaned)
-            armed_until = 0.0
+            armed_until["value"] = 0.0
 
     whisper_listener.start(on_transcript)
 
