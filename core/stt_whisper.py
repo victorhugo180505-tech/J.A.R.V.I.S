@@ -71,10 +71,12 @@ class WhisperListener:
         return self._model
 
     def _run(self) -> None:
+        print("WhisperListener._run started")
         try:
             import numpy as np  # type: ignore
             import sounddevice as sd  # type: ignore
-        except Exception:
+        except Exception as exc:
+            print(f"WhisperListener._run import error: {exc}")
             return
 
         cfg = self.config
@@ -83,6 +85,7 @@ class WhisperListener:
         audio_buffer = []
         speech_start: Optional[float] = None
         last_voice = 0.0
+        last_rms_log = 0.0
 
         def reset_buffer():
             nonlocal audio_buffer, speech_start, last_voice
@@ -98,6 +101,11 @@ class WhisperListener:
             device=cfg.input_device,
         ) as stream:
             self._stream = stream
+            print(
+                "WhisperListener InputStream opened "
+                f"device={cfg.input_device} samplerate={cfg.sample_rate} "
+                f"channels={cfg.input_channels}"
+            )
 
             while not self._stop.is_set():
                 if not self.state.mic_enabled:
@@ -112,6 +120,10 @@ class WhisperListener:
                     mono = data[:, 0]
                 rms = float(np.sqrt(np.mean(np.square(mono))))
                 now = time.time()
+
+                if now - last_rms_log >= 1.0:
+                    print(f"WhisperListener RMS={rms:.6f}")
+                    last_rms_log = now
 
                 if rms >= cfg.speech_threshold:
                     if speech_start is None:
@@ -135,6 +147,7 @@ class WhisperListener:
                     reset_buffer()
 
     def _transcribe(self, audio) -> None:
+        print("WhisperListener._transcribe called")
         model = self._ensure_model()
         segments = None
         try:
@@ -168,6 +181,7 @@ class WhisperListener:
             return
 
         if text and self._callback:
+            print(f"WhisperListener transcript: {text}")
             self._callback(text)
 
     @staticmethod

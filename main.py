@@ -1,4 +1,5 @@
 from ai.deepseek import ask_deepseek
+import os
 import queue
 import re
 import threading
@@ -13,13 +14,15 @@ from jarvis_avatar_web.server import ws_server as avatar_ws_server
 from native_bridge import http_bridge
 from core.control_server import ControlServer
 from core.state import state
-from core.stt_whisper import WhisperListener
+from core.stt_azure import AzureSpeechListener
 
 # ===============================
 # Azure Speech (DEV LOCAL)
 # ===============================
-AZURE_KEY = "4If2jiaeaalPiqhcpiLUnMHERnfnIzaB83nbFL5vBzoicNgZHKYrJQQJ99CAACYeBjFXJ3w3AAAYACOGvZnT"   # <-- pega tu key aquí (local)
-AZURE_REGION = "eastus"
+AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY", "")
+AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "")
+AZURE_KEY = AZURE_SPEECH_KEY
+AZURE_REGION = AZURE_SPEECH_REGION
 AZURE_VOICE = "es-MX-DaliaNeural"
 
 SYSTEM_PROMPT = """
@@ -225,7 +228,11 @@ avatar = AvatarWSClient("ws://127.0.0.1:8765")
 avatar.start()
 control_server = ControlServer(state)
 control_server.start()
-whisper_listener = WhisperListener(state)
+whisper_listener = AzureSpeechListener(
+    state,
+    key=AZURE_SPEECH_KEY,
+    region=AZURE_SPEECH_REGION,
+)
 
 print("Jarvis iniciado. Escribe 'salir' para terminar.")
 
