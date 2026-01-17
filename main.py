@@ -1,5 +1,8 @@
 from ai.deepseek import ask_deepseek
+import queue
 import re
+import threading
+import time
 from core.memory import add_message, get_conversation
 from core.parser import parse_response
 from actions.dispatcher import dispatch_action
@@ -10,6 +13,7 @@ from jarvis_avatar_web.server import ws_server as avatar_ws_server
 from native_bridge import http_bridge
 from core.control_server import ControlServer
 from core.state import state
+from core.stt_whisper import WhisperListener
 
 # ===============================
 # Azure Speech (DEV LOCAL)
@@ -116,6 +120,92 @@ def start_local_servers():
 
     return stop_handles
 
+
+def normalize_text(text: str) -> str:
+    return (text or "").strip()
+
+
+def handle_user_text(user_text: str):
+    user_text = normalize_text(user_text)
+    if not user_text:
+        return
+
+    add_message("user", user_text)
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(get_conversation())
+
+    try:
+        raw_response = ask_deepseek(messages)
+    except Exception as e:
+        print("⚠️ Error comunicándose con la IA:", e)
+        return
+
+    try:
+        data = parse_response(raw_response)
+    except ValueError as e:
+        print("⚠️ Error parseando JSON:", e)
+        return
+
+    emo = normalize_emotion(data.get("emotion", "neutral"))
+    speech = (data.get("speech", "") or "").strip()
+    tts_text = prepare_tts_text(speech)
+
+    add_message("assistant", speech)
+    print(f"Jarvis ({emo}): {speech}")
+
+    # 1) mood persistente
+    avatar.send_emotion(emo)
+
+    # 2) TTS (Azure) -> WS type:"tts"
+    #    Import LAZY para que NO truene el programa si falta el SDK / estás en otro Python.
+    if tts_text and have_azure_config():
+        try:
+            from core.azure_tts import synthesize_tts_with_visemes
+
+            audio_b64, visemes = synthesize_tts_with_visemes(
+                tts_text,
+                key=AZURE_KEY,
+                region=AZURE_REGION,
+                voice=AZURE_VOICE
+            )
+
+            if not audio_b64:
+                raise RuntimeError("Azure devolvió audio vacío (audio_b64='').")
+
+            print(f"[AZURE] OK audio_b64_len={len(audio_b64)} visemes={len(visemes)}")
+
+            # Requiere que AvatarWSClient tenga send_raw()
+            if not hasattr(avatar, "send_raw"):
+                raise RuntimeError("AvatarWSClient no tiene send_raw(). Agrega send_raw() en avatar_ws_client.py")
+
+            avatar.send_raw({
+                "type": "tts",
+                "emotion": emo,
+                "audio_b64": audio_b64,
+                "visemes": visemes
+            })
+            print("[WS OUT] tts queued, bytes=", len(audio_b64))
+            print("[WS STATUS]", avatar.status())
+
+        except Exception as e:
+            print("[AZURE] FAIL -> fallback say:", repr(e))
+            avatar.send_say(speech, emo)
+    else:
+        # Sin texto o sin config Azure
+        if not tts_text:
+            print("[TTS] speech vacío -> no mando TTS.")
+        elif not have_azure_config():
+            print("[TTS] falta AZURE_KEY/AZURE_REGION -> fallback say.")
+        avatar.send_say(speech, emo)
+
+    # 3) acción windows
+    try:
+        result = dispatch_action(data["action"])
+        print("✔", result)
+    except Exception as e:
+        print("⚠️ Error ejecutando acción:", e)
+
 def stop_local_servers(stop_handles):
     bridge = stop_handles.get("http_bridge")
     if bridge:
@@ -135,92 +225,57 @@ avatar = AvatarWSClient("ws://127.0.0.1:8765")
 avatar.start()
 control_server = ControlServer(state)
 control_server.start()
+whisper_listener = WhisperListener(state)
 
 print("Jarvis iniciado. Escribe 'salir' para terminar.")
 
 try:
+    input_queue: "queue.Queue[str]" = queue.Queue()
+    stop_event = threading.Event()
+
+    def stdin_worker():
+        while not stop_event.is_set():
+            try:
+                user_input = input("Tú: ").strip()
+            except EOFError:
+                break
+            if user_input:
+                input_queue.put(user_input)
+
+    threading.Thread(target=stdin_worker, daemon=True).start()
+
+    wake_word = "oye jarvis"
+    armed_until = 0.0
+
+    def on_transcript(text: str):
+        nonlocal armed_until
+        cleaned = normalize_text(text).lower()
+        if not cleaned:
+            return
+        now = time.time()
+        if wake_word in cleaned:
+            remainder = cleaned.replace(wake_word, "").strip(" ,.")
+            armed_until = now + 6.0
+            if remainder:
+                input_queue.put(remainder)
+            return
+        if now <= armed_until:
+            input_queue.put(cleaned)
+            armed_until = 0.0
+
+    whisper_listener.start(on_transcript)
+
     while True:
-        user_input = input("Tú: ").strip()
+        try:
+            user_input = input_queue.get(timeout=0.1)
+        except queue.Empty:
+            continue
         if user_input.lower() == "salir":
             break
-
-        add_message("user", user_input)
-
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(get_conversation())
-
-        try:
-            raw_response = ask_deepseek(messages)
-        except Exception as e:
-            print("⚠️ Error comunicándose con la IA:", e)
-            continue
-
-        try:
-            data = parse_response(raw_response)
-        except ValueError as e:
-            print("⚠️ Error parseando JSON:", e)
-            continue
-
-        emo = normalize_emotion(data.get("emotion", "neutral"))
-        speech = (data.get("speech", "") or "").strip()
-        tts_text = prepare_tts_text(speech)
-
-        add_message("assistant", speech)
-        print(f"Jarvis ({emo}): {speech}")
-
-        # 1) mood persistente
-        avatar.send_emotion(emo)
-
-        # 2) TTS (Azure) -> WS type:"tts"
-        #    Import LAZY para que NO truene el programa si falta el SDK / estás en otro Python.
-        if tts_text and have_azure_config():
-            try:
-                from core.azure_tts import synthesize_tts_with_visemes
-
-                audio_b64, visemes = synthesize_tts_with_visemes(
-                    tts_text,
-                    key=AZURE_KEY,
-                    region=AZURE_REGION,
-                    voice=AZURE_VOICE
-                )
-
-                if not audio_b64:
-                    raise RuntimeError("Azure devolvió audio vacío (audio_b64='').")
-
-                print(f"[AZURE] OK audio_b64_len={len(audio_b64)} visemes={len(visemes)}")
-
-                # Requiere que AvatarWSClient tenga send_raw()
-                if not hasattr(avatar, "send_raw"):
-                    raise RuntimeError("AvatarWSClient no tiene send_raw(). Agrega send_raw() en avatar_ws_client.py")
-
-                avatar.send_raw({
-                    "type": "tts",
-                    "emotion": emo,
-                    "audio_b64": audio_b64,
-                    "visemes": visemes
-                })
-                print("[WS OUT] tts queued, bytes=", len(audio_b64))
-                print("[WS STATUS]", avatar.status())
-
-            except Exception as e:
-                print("[AZURE] FAIL -> fallback say:", repr(e))
-                avatar.send_say(speech, emo)
-        else:
-            # Sin texto o sin config Azure
-            if not tts_text:
-                print("[TTS] speech vacío -> no mando TTS.")
-            elif not have_azure_config():
-                print("[TTS] falta AZURE_KEY/AZURE_REGION -> fallback say.")
-            avatar.send_say(speech, emo)
-
-        # 3) acción windows
-        try:
-            result = dispatch_action(data["action"])
-            print("✔", result)
-        except Exception as e:
-            print("⚠️ Error ejecutando acción:", e)
+        handle_user_text(user_input)
 
 finally:
+    whisper_listener.stop()
     avatar.stop()
     control_server.stop()
     stop_local_servers(server_handles)
