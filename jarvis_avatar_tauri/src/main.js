@@ -8,6 +8,8 @@ document.title = "JARVIS_AVATAR__5f3c9e";
 
 const canvas = document.getElementById("c");
 const statusEl = document.getElementById("control-status");
+const listenIndicator = document.getElementById("listen-indicator");
+const listenText = document.getElementById("listen-text");
 const toggleMicBtn = document.getElementById("toggle-mic");
 const toggleAudioBtn = document.getElementById("toggle-audio");
 const toggleVisionBtn = document.getElementById("toggle-vision");
@@ -45,6 +47,23 @@ function applyToggleState(button, enabled) {
   button.setAttribute("aria-pressed", String(Boolean(enabled)));
 }
 
+function applyListenIndicator(state) {
+  if (!listenIndicator || !listenText) return;
+  const micOn = Boolean(state?.mic_enabled);
+  const wakeActive = Boolean(state?.wake_active);
+
+  listenIndicator.classList.toggle("is-on", micOn);
+  listenIndicator.classList.toggle("is-wake", wakeActive);
+
+  if (!micOn) {
+    listenText.textContent = "Mic apagado";
+  } else if (wakeActive) {
+    listenText.textContent = "Wake word detectado";
+  } else {
+    listenText.textContent = "Escuchando… (Oye Jarvis)";
+  }
+}
+
 async function refreshControlStatus() {
   if (!statusEl) return;
   try {
@@ -53,11 +72,13 @@ async function refreshControlStatus() {
     applyToggleState(toggleMicBtn, state.mic_enabled);
     applyToggleState(toggleAudioBtn, state.audio_enabled);
     applyToggleState(toggleVisionBtn, state.vision_enabled);
+    applyListenIndicator(state);
   } catch (err) {
     statusEl.textContent = "Control server offline";
     applyToggleState(toggleMicBtn, false);
     applyToggleState(toggleAudioBtn, false);
     applyToggleState(toggleVisionBtn, false);
+    applyListenIndicator({ mic_enabled: false, wake_active: false });
   }
 }
 
@@ -78,6 +99,7 @@ bindToggle(toggleMicBtn, "/mic/toggle");
 bindToggle(toggleAudioBtn, "/audio/toggle");
 bindToggle(toggleVisionBtn, "/vision/toggle");
 refreshControlStatus();
+setInterval(refreshControlStatus, 1000);
 
 // -----------------------------
 // State

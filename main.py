@@ -251,7 +251,7 @@ try:
         try:
             import winsound
 
-            winsound.Beep(880, 140)
+            winsound.Beep(880, 1000)
         except Exception:
             return
 
@@ -263,13 +263,17 @@ try:
         if wake_word in cleaned:
             remainder = cleaned.replace(wake_word, "").strip(" ,.")
             armed_until["value"] = now + 6.0
+            state.set_wake_active(True)
             play_wake_beep()
+            threading.Timer(1.2, lambda: state.set_wake_active(False)).start()
             if remainder:
                 input_queue.put(remainder)
+                state.set_wake_active(False)
             return
         if now <= armed_until["value"]:
             input_queue.put(cleaned)
             armed_until["value"] = 0.0
+            state.set_wake_active(False)
 
     whisper_listener.start(on_transcript)
 

@@ -50,3 +50,33 @@ html, body { margin:0; height:100%; overflow:hidden; background:#111; }
   opacity: 0.85;
   white-space: nowrap;
 }
+
+#listen-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #d7d7d7;
+  font-size: 11px;
+}
+
+#listen-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b6b6b;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+
+#listen-indicator.is-on #listen-dot {
+  background: #48d77f;
+  box-shadow: 0 0 8px rgba(72, 215, 127, 0.8);
+}
+
+#listen-indicator.is-wake #listen-dot {
+  background: #35f2ff;
+  box-shadow: 0 0 10px rgba(53, 242, 255, 0.9);
+}
