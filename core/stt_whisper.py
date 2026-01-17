@@ -14,8 +14,10 @@ class WhisperConfig:
     model_size: str = "base"
     device: str = "cuda"
     compute_type: str = "int8_float16"
-    sample_rate: int = 16000
-    block_size: int = 1600
+    sample_rate: int = 44100
+    block_size: int = 4410
+    input_device: Optional[int] = 1
+    input_channels: int = 2
     speech_threshold: float = 0.012
     min_speech_seconds: float = 0.45
     silence_timeout: float = 0.6
@@ -77,9 +79,10 @@ class WhisperListener:
 
         with sd.InputStream(
             samplerate=cfg.sample_rate,
-            channels=1,
+            channels=cfg.input_channels,
             blocksize=cfg.block_size,
             dtype="float32",
+            device=cfg.input_device,
         ) as stream:
             self._stream = stream
 
@@ -90,7 +93,10 @@ class WhisperListener:
                     continue
 
                 data, _ = stream.read(cfg.block_size)
-                mono = data[:, 0]
+                if cfg.input_channels > 1:
+                    mono = data.mean(axis=1)
+                else:
+                    mono = data[:, 0]
                 rms = float(np.sqrt(np.mean(np.square(mono))))
                 now = time.time()
 
