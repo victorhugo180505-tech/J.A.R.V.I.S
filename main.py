@@ -100,7 +100,7 @@ def start_local_servers():
         print(f"⚠️ No se pudo iniciar HTTP bridge: {exc}")
 
     try:
-        stop_handles["mouse_stream"] = mouse_stream_auto.start_mouse_stream_in_thread()
+        stop_handles["mouse_stream"] = mouse_stream_auto.start_mouse_stream_in_thread(verbose=False)
         print("✔ Mouse listener iniciado desde main.py")
     except Exception as exc:
         print(f"⚠️ No se pudo iniciar mouse listener: {exc}")

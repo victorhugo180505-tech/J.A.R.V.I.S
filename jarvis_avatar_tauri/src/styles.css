@@ -26,10 +26,23 @@ html, body { margin:0; height:100%; overflow:hidden; background:#111; }
   padding: 6px 10px;
   border-radius: 8px;
   cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 #controls button:hover {
   background: rgba(255, 255, 255, 0.25);
+}
+
+#controls button.is-on {
+  background: rgba(80, 200, 120, 0.35);
+  border-color: rgba(80, 200, 120, 0.75);
+  color: #eafff1;
+}
+
+#controls button.is-off {
+  background: rgba(220, 80, 80, 0.25);
+  border-color: rgba(220, 80, 80, 0.55);
+  color: #ffecec;
 }
 
 #control-status {

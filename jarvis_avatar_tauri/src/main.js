@@ -38,13 +38,26 @@ async function fetchJson(path, options = {}) {
   return res.json();
 }
 
+function applyToggleState(button, enabled) {
+  if (!button) return;
+  button.classList.toggle("is-on", Boolean(enabled));
+  button.classList.toggle("is-off", !enabled);
+  button.setAttribute("aria-pressed", String(Boolean(enabled)));
+}
+
 async function refreshControlStatus() {
   if (!statusEl) return;
   try {
     const state = await fetchJson("/state");
     statusEl.textContent = `Mic: ${state.mic_enabled ? "ON" : "OFF"} · Audio: ${state.audio_enabled ? "ON" : "OFF"} · Visión: ${state.vision_enabled ? "ON" : "OFF"}`;
+    applyToggleState(toggleMicBtn, state.mic_enabled);
+    applyToggleState(toggleAudioBtn, state.audio_enabled);
+    applyToggleState(toggleVisionBtn, state.vision_enabled);
   } catch (err) {
     statusEl.textContent = "Control server offline";
+    applyToggleState(toggleMicBtn, false);
+    applyToggleState(toggleAudioBtn, false);
+    applyToggleState(toggleVisionBtn, false);
   }
 }
 
