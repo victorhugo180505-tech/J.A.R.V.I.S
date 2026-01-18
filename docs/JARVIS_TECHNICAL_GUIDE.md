@@ -1,284 +1,202 @@
-# J.A.R.V.I.S — Guía técnica, roadmap y plan incremental
+# J.A.R.V.I.S — Guía técnica, arquitectura actualizada y roadmap
 
-> Objetivo: evolucionar JARVIS de asistente conversacional a **compañero digital persistente** con presencia audiovisual, interacción por voz, visión de pantallas, control de audio del sistema y automatizaciones con n8n.
+> Objetivo: evolucionar J.A.R.V.I.S de asistente conversacional a **compañero digital persistente** con presencia audiovisual, interacción por voz, visión de pantallas, control del sistema y automatizaciones (n8n), respetando privacidad y control del usuario.
 
 ## 1) Contexto actual del repo (resumen técnico)
 
-### 1.1 Flujo principal
-- `main.py` ejecuta el loop interactivo, llama a DeepSeek, parsea JSON, actualiza emociones y dispara acciones. Integra TTS de Azure con visemas y envía mensajes por WebSocket al avatar.【F:main.py†L1-L140】
+### 1.1 Flujo principal (backend)
+- `main.py` orquesta el loop principal: recibe texto, consulta al LLM (DeepSeek), parsea JSON, actualiza emociones y dispara acciones, además de enviar eventos al avatar vía WebSocket.【F:main.py†L1-L209】
+- El backend inicia servicios locales:
+  - WS del avatar (`jarvis_avatar_web/server/ws_server.py`).【F:main.py†L73-L97】
+  - HTTP bridge para la extensión de Chrome (`native_bridge/http_bridge.py`).【F:main.py†L79-L90】
+  - Mouse stream para el avatar (`jarvis_avatar_web/server/mouse_stream_auto.py`).【F:main.py†L92-L97】
+- Controla STT con `AzureSpeechListener` y gating por wake word detectado en transcripción.【F:main.py†L201-L299】
+
+### 1.2 IA, memoria y parsing
+- `ai/deepseek.py` es el cliente LLM actual (DeepSeek).【F:ai/deepseek.py†L1-L19】
 - `core/memory.py` mantiene memoria corta (últimos 10 mensajes).【F:core/memory.py†L1-L16】
-- `core/parser.py` valida JSON de la IA.【F:core/parser.py†L1-L9】
+- `core/parser.py` valida el JSON devuelto por el LLM.【F:core/parser.py†L1-L9】
 
-### 1.2 IA y prompts
-- `ai/deepseek.py` es el cliente único actual del LLM principal.【F:ai/deepseek.py†L1-L19】
-- `config.py` contiene claves y parámetros del modelo.【F:config.py†L1-L5】
+### 1.3 Voz y estado
+- `core/azure_tts.py` sintetiza TTS con visemas (Azure) para sincronizar labios con el avatar.【F:core/azure_tts.py†L1-L93】
+- `core/stt_azure.py` escucha el micrófono y emite transcripciones (Azure).【F:core/stt_azure.py†L1-L75】
+- `core/stt_whisper.py` ofrece alternativa local (Whisper) con VAD simple y segmentación por silencio.【F:core/stt_whisper.py†L1-L209】
+- `core/state.py` mantiene toggles de audio/mic/visión y estado de wake word.【F:core/state.py†L1-L41】
 
-### 1.3 Acciones y automatización local
-- `actions/dispatcher.py` enruta acciones (open_app, youtube_control).【F:actions/dispatcher.py†L1-L19】
-- `actions/open_app.py` abre apps con lista blanca local.【F:actions/open_app.py†L1-L20】
-- `actions/youtube_ext.py` usa HTTP bridge local en `127.0.0.1:8766/command` para controlar YouTube vía extensión de Chrome.【F:actions/youtube_ext.py†L1-L32】
+### 1.4 Captura de audio/visión
+- `core/audio_capture.py` define loopback del sistema (soundcard).【F:core/audio_capture.py†L1-L67】
+- `core/mic_input.py` es una base para VAD/STT local con sounddevice.【F:core/mic_input.py†L1-L72】
+- `core/vision_capture.py` captura pantallas con `mss` y respeta `vision_enabled`.【F:core/vision_capture.py†L1-L39】
 
-### 1.4 Avatar + WS
-- `jarvis_avatar_web/server/ws_server.py` es el hub WS para emoción/estado/mensajes del avatar y puede iniciarse en background desde `main.py` para evitar pasos manuales.【F:jarvis_avatar_web/server/ws_server.py†L1-L145】
+### 1.5 Control server local (HTTP)
+- `core/control_server.py` expone:
+  - `/health` (salud), `/state` (snapshot).
+  - toggles POST: `/audio/toggle`, `/mic/toggle`, `/vision/toggle`.
+  - `/vision/snapshot?monitor=N` para imagen PNG del monitor.【F:core/control_server.py†L1-L94】
 
-### 1.5 Bridge con Chrome
-- `native_bridge/http_bridge.py` expone `/command` para enviar JSON a la extensión (Native Messaging) y puede iniciarse desde `main.py` en el mismo arranque del asistente.【F:native_bridge/http_bridge.py†L1-L80】
-- `native_bridge/native_host.py` transmite payloads entre el bridge y el Chrome Extension.【F:native_bridge/native_host.py†L1-L130】
+### 1.6 Wake word + launcher
+- `core/wake_word.py` integra openwakeword con modelo `hey_jarvis_v0.1`.【F:core/wake_word.py†L1-L140】
+- `tools/wake_jarvis.py` lanza `main.py` y Tauri en dev, valida `/health` y hace `POST /mic/toggle` al detectar wake word.【F:tools/wake_jarvis.py†L1-L150】
 
----
+### 1.7 Acciones + bridge con Chrome
+- `actions/dispatcher.py` rutea acciones (`open_app`, `youtube_control`).【F:actions/dispatcher.py†L1-L20】
+- `actions/open_app.py` abre apps con whitelist local.【F:actions/open_app.py†L1-L20】
+- `actions/youtube_ext.py` usa el HTTP bridge en `127.0.0.1:8766/command` para controlar YouTube.【F:actions/youtube_ext.py†L1-L32】
+- `native_bridge/http_bridge.py` y `native_bridge/native_host.py` conectan con la extensión de Chrome.【F:native_bridge/http_bridge.py†L1-L80】【F:native_bridge/native_host.py†L1-L130】
 
-## 2) Arquitectura objetivo (módulos concretos)
-
-### 2.1 Orquestador central (Dialogue Orchestrator)
-**Responsabilidades**
-- Recibir inputs: texto, voz, eventos del sistema.
-- Enviar respuestas inmediatas (fast brain) y delegar razonamiento profundo (deep brain).
-- Gobernar estado emocional global y sincronizar avatar/voz/texto.
-
-**Integración con el repo actual**
-- Se conecta al mismo flujo de `main.py` (o reemplaza el loop actual con una versión asíncrona).
-- Usa `AvatarWSClient` para reacciones inmediatas (emotion, say).【F:main.py†L1-L133】
-
-### 2.2 Sistema de “dos cerebros” (Fast + Deep)
-- **Fast brain**: respuestas reactivas inmediatas, fillers, gestos.
-- **Deep brain**: razonamiento, planeación, tareas multi-paso.
-
-**Comunicación**
-- Un bus interno (event queue) donde:
-  - Fast brain publica un “ack/placeholder” inmediato.
-  - Deep brain publica la respuesta final y/o acciones.
-
-**Coherencia de personalidad**
-- Ambos cerebros comparten un “persona descriptor” fijo para tono y estilo.
-
-### 2.3 Memoria avanzada
-- **Corto plazo**: conversación actual (mantener y extender `core/memory.py`).【F:core/memory.py†L1-L16】
-- **Episódica**: eventos importantes (acciones, tareas finalizadas).
-- **Emocional**: “cómo se sintió” cada evento.
-- **Semántica**: hechos sobre el usuario (preferencias, contextos).
-- **Operativa**: tareas pendientes y estados.
-
-**Reglas**
-- Guardar eventos de alto impacto (acciones reales, cambios de emoción relevantes).
-- Olvidar microconversas triviales.
-- Consultar memoria profunda solo cuando el deep brain detecte necesidad.
-
-### 2.4 Sistema nervioso externo (n8n)
-- JARVIS delega tareas a n8n vía webhooks.
-- n8n ejecuta integraciones y devuelve resultados a JARVIS.
+### 1.8 Avatar y UI
+- `jarvis_avatar_web/server/ws_server.py` es el WS hub que recibe `emotion`, `say` y `tts`.【F:jarvis_avatar_web/server/ws_server.py†L1-L145】
+- `jarvis_avatar_web/web/` contiene el front web (Three.js + VRM).【F:jarvis_avatar_web/web/main.js†L1-L200】
+- `jarvis_avatar_tauri/` existe para empaquetar UI de escritorio (dev mode desde `tools/wake_jarvis.py`).【F:tools/wake_jarvis.py†L18-L92】
 
 ---
 
-## 3) Requisitos nuevos del usuario (audio + visión + wake word + privacy)
+## 2) Arquitectura actualizada (as-is)
 
-### 3.1 Acceso al audio del sistema
-**Objetivo**: JARVIS “escucha” audio del sistema (música, videollamadas, etc.).
+### 2.1 Wake word & launcher
+- Listener local (`core/wake_word.py`) + launcher (`tools/wake_jarvis.py`).
+- Detecta wake word, asegura backend y Tauri, y activa mic con `/mic/toggle`.
 
-**Propuesta técnica (PC local)**
-- **Windows**: capturar audio del sistema con WASAPI loopback.
-- Crear un módulo `audio_capture.py` que exponga:
-  - `start_audio_stream()`
-  - `pause_audio_stream()`
-  - `resume_audio_stream()`
-- Enviar frames a:
-  - Transcriptor (STT local o API)
-  - Detector de eventos (por ejemplo, identificar música o conversaciones)
+### 2.2 Core Backend (Python)
+- `main.py` = orquestador actual (LLM → JSON → emoción/acción).
+- Control server: `core/control_server.py` en `127.0.0.1:8780`.
+- Estado global en `core/state.py` (audio/mic/visión/wake).
+- STT activo: Azure por defecto (`core/stt_azure.py`), Whisper opcional (`core/stt_whisper.py`).
+- TTS Azure con visemas (`core/azure_tts.py`).
+- Memoria corta (`core/memory.py`).
 
-### 3.2 Visión de pantallas (multi-monitor)
-**Objetivo**: JARVIS ve ambas pantallas (captura de imagen periódica o bajo demanda).
+### 2.3 Avatar/UI
+- WS backend en `jarvis_avatar_web/server/ws_server.py` (puerto 8765).
+- Front Web VRM en `jarvis_avatar_web/web/`.
+- Cliente WS en backend `AvatarWSClient` (envía `emotion`, `say`, `tts`).【F:jarvis_avatar_web/server/avatar_ws_client.py†L1-L120】
+- Tauri en `jarvis_avatar_tauri/` (dev, no siempre activo).
 
-**Propuesta técnica**
-- Captura por monitor (por ejemplo `mss` o APIs del SO).
-- Mantener buffers de imagen con timestamps.
-- Endpoint local `/vision/snapshot?monitor=1|2` para JARVIS.
-- Botón de “pausa visión” para desactivar capturas.
+### 2.4 Integraciones y acciones
+- Acciones locales: `open_app`, `youtube_control`.
+- Bridge con Chrome Extension vía `native_bridge/http_bridge.py`.
+- n8n: **futuro** (no implementado aún en el repo).
 
-### 3.3 Voz del usuario (input hablado)
-**Objetivo**: hablar con JARVIS usando micrófono.
-
-**Propuesta**
-- Pipeline: mic → VAD → STT → text → orquestador.
-- VAD reduce latencia y evita transcripciones innecesarias.
-- Opción de “mute mic” como interrupción de privacidad.
-
-### 3.4 Wake word (frase activadora)
-**Objetivo**: JARVIS se activa al escuchar una frase.
-
-**Propuesta**
-- Frase activadora definida: **“Oye JARVIS”** (pronunciado “yarbis”).
-- Motor wake word local (ej. Porcupine u otro lightweight local).
-- Solo despierta el pipeline de STT cuando detecta frase.
-
-### 3.5 Botones “pausar visión” y “pausar audio”
-**Objetivo**: control total del usuario sobre privacidad.
-
-**Implementación**
-- Estado global `vision_enabled` y `audio_enabled`.
-- UI (web o Tauri) con botones de toggle (Tauri ya llama al control server local).
-- Orquestador verifica estos estados antes de capturar o procesar audio/vision.
-
-### 3.6 TTS local y gratuito
-**Objetivo**: usar TTS gratuito sin depender de servicios pagos.
-
-**Propuesta**
-- Motor TTS local (ej. Piper u otro motor offline).
+### 2.5 Privacidad y control
+- Toggles de audio/mic/visión via ControlServer.
+- Capturas bloqueadas si `vision_enabled = False`.
 
 ---
 
-## 4) Experiencia humana y presencia realista
+## 3) Brechas vs objetivos (qué falta consolidar)
 
-### 4.1 Latencia percibida
-- Objetivo: respuesta inicial <300–500ms.
-- Estrategia:
-  - Respuesta inmediata (fast brain) con filler.
-  - Deep brain procesa en background.
-
-### 4.2 Emociones como sistema
-- Estado emocional persistente con decay.
-- Emoción afecta:
-  - Texto (tono)
-  - Voz (ritmo, énfasis)
-  - Avatar (expresiones)
-
-### 4.3 Sincronización avatar-voz
-- Emoción se envía al WS antes del audio.
-- TTS genera visemas, avatar sincroniza labios.
+1. **Máquina de estados de conversación** (IDLE/LISTENING/THINKING/SPEAKING).
+2. **Pipeline de STT robusto** para frases largas y normalización de “Jarvis/Yarvis”.
+3. **Movimiento corporal y cámara** en el avatar (hoy es mayormente estático).
+4. **Memoria persistente** (hoy es solo memoria corta in-memory).
+5. **Integraciones reales** (n8n, Calendar, Docs, etc.).
+6. **Multidispositivo** (PWA/LiveKit).
 
 ---
 
-## 5) Integración con n8n (acciones reales, no solo demo)
+## 4) Roadmap con nombres “cool” (mitología/SCI-FI)
 
-### 5.1 Ejemplos concretos
-- “Activa modo focus”: cerrar apps distractoras, activar playlist, abrir IDE.
-- “Resumen diario”: recoger tareas y enviar recordatorios.
-- “Rutinas de salud”: water reminders + pausas.
-- “Reacción emocional”: si detecta frustración → baja tono, sugiere descanso.
-- “Memoria persistente”: n8n guarda eventos importantes en DB externa.
+> Cada versión es una iteración de ~1 día (algunas pueden requerir 2).
 
-### 5.2 Flujo sugerido
-- JARVIS → n8n (webhook) → acción → callback a JARVIS.
+### 0.1 — “Hermes Vigil” (Wake word + launcher)
+- Documentar y pulir `core/wake_word.py` (openwakeword) y `tools/wake_jarvis.py`.
+- Verificar healthcheck `GET /health` antes de lanzar Tauri.
+- Consolidar `POST /mic/toggle` como entrada principal del modo escucha.
+- Añadir nota de instalación de dependencias (`sounddevice`, `openwakeword`).
 
----
+### 0.2 — “Atenea Signal” (State machine)
+- Crear `core/conversation_state.py` con estados `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`.
+- Integrar estado con:
+  - STT (inicio/fin de escucha).
+  - LLM (envío/recepción de respuesta).
+  - TTS (inicio/fin de habla).
+- Publicar estado vía WS (`type: "state"`) y opcional `/status`.
 
-## 6) Roadmap de evolución
+### 0.3 — “Iris Flow” (STT robusto)
+- Mejorar `core/stt_whisper.py` para frases largas (ventana + timeout).
+- Normalizar wake word con `normalize_wake_name()` y usarlo tanto en Azure como Whisper.
+- Añadir pruebas locales para detectar “Jarvis/Yarvis” sin falsos positivos.
 
-### Fase 1 — Fundaciones
-1. Refactorizar loop principal para soportar entradas simultáneas (texto + voz + eventos).
-2. Introducir estados globales: `audio_enabled`, `vision_enabled`.
-3. Crear módulo de audio capture (sistema y micrófono).
-4. Crear módulo de vision capture (pantallas).
+### 0.4 — “Hefesto Pulse” (Movimiento corporal)
+- Implementar `AvatarMovementController` en `jarvis_avatar_web/web/main.js`.
+- Mapear huesos VRM (hips, spine, chest, neck, head) para sway suave.
+- Ajustar postura según estado (IDLE/LISTENING/THINKING/SPEAKING).
 
-### Fase 2 — Fast/Deep brain
-1. Implementar “fast brain” inmediato con prompt mínimo.
-2. Implementar “deep brain” con razonamiento largo.
-3. Bus interno de eventos para coordinar respuestas.
+### 0.5 — “Artemisa Gaze” (Cámara)
+- Crear `CameraController` en el front (web/Tauri).
+- Modos: `DEFAULT`, `SLIGHT_IN`, `CLOSE_UP`, `ZOOM_OUT`.
+- Transiciones suaves por interpolación en cada frame.
 
-### Fase 3 — Memoria avanzada
-1. Guardado episódico + emocional.
-2. Consultas semánticas en segundo plano.
-3. Persistencia externa (DB local o n8n).
+### 0.6 — “Afrodita Bridge” (Emoción end-to-end)
+- Estándar de emociones `{name, intensity}`.
+- Backend decide emoción por respuesta LLM + contexto.
+- Front mapea emoción → blendshapes + postura.
 
-### Fase 4 — Presencia realista
-1. Micro-expresiones y gestos automáticos.
-2. Streaming de respuestas (partial speech).
-3. Señales visuales de “pensando”.
+### 0.7 — “Prometeo Dock” (LLM pluggable)
+- Interfaz `LLMProvider` con `generate(messages, tools)`.
+- Implementar `DeepSeekProvider` + fallback `OpenAIProvider`.
+- Configuración por `.env.local`.
 
----
+### 0.8 — “Mnemosine Seed” (Memoria)
+- `MemoryStore` persistente + `PeopleDB`.
+- API: `add_person`, `update_person`, `get_person`, `list_people`.
+- LLM usa herramientas para consultar memoria.
 
-## 7) Plan incremental con tareas concretas (accionable)
+### 0.9 — “Nike Weave” (Tareas y metas)
+- Persistencia local para tareas/proyectos/metas.
+- Endpoints: `create_task`, `list_tasks`, `update_task`, `complete_task`.
+- Flujos de voz para crear y cerrar tareas.
 
-### Iteración 1: Audio y controles de privacidad
-- [ ] Crear `core/audio_capture.py` con WASAPI loopback.
-- [ ] Crear `core/mic_input.py` con VAD + STT.
-- [ ] Añadir estados `audio_enabled` y `mic_enabled`.
-- [ ] Exponer toggles en UI (web/tauri).
+### 1.0 — “Chronos Link” (Calendar)
+- Integración con Google Calendar vía n8n.
+- Endpoints: `schedule_event`, `get_upcoming_events`.
+- UX de voz para agendar y consultar.
 
-### Iteración 2: Visión multi-monitor
-- [ ] Crear `core/vision_capture.py` con snapshots por monitor.
-- [ ] Botón UI “Pause Vision”.
-- [ ] Endpoint local para snapshots.
+### 1.1 — “Calíope Scribe” (Docs/Sheets)
+- Flujos en n8n para Docs/Sheets.
+- Generar resúmenes y tablas simples desde voz.
 
-### Iteración 3: Wake word
-- [ ] Integrar motor wake word.
-- [ ] Activar pipeline STT solo tras wake word.
+### 1.2 — “Jano Echo” (PWA móvil)
+- UI web ligera (chat + mic + audio output).
+- Responsive para Android.
+- Backend expuesto con túnel (ngrok/Cloudflare).
 
-### Iteración 4: Dual-brain
-- [ ] Crear `brain_fast.py` + `brain_deep.py`.
-- [ ] Event bus para outputs.
-- [ ] Fast brain responde en <300ms.
+### 1.3 — “Orfeo Room” (Modo llamada)
+- LiveKit/WebRTC para audio bidireccional.
+- Bot Jarvis en la room + cliente móvil/PC.
+- Barge-in: si usuario habla, Jarvis se pausa.
 
-### Iteración 5: Memoria avanzada
-- [ ] Agregar DB local o sqlite.
-- [ ] Persistir memoria episódica + semántica.
-- [ ] Resumen diario con n8n.
+### 1.4 — “Hestia Check-in” (Salud mental suave)
+- Análisis semanal de hábitos/uso.
+- Check-ins con opción de opt-out.
 
----
+### 1.5 — “Hera Guardian” (PeopleDB social)
+- Recordatorios suaves de fechas/personas clave.
+- Control de intensidad social (slider).
 
-## 8) Qué puedo implementar ahora mismo vs. qué requiere tu intervención
+### 1.6 — “Aegis Mode” (Seguridad)
+- Modos: `assist`, `semi-auto`, `observer`.
+- Whitelist de acciones peligrosas.
+- Panel para auditoría de comandos.
 
-### Lo que puedo hacer por mi cuenta (sin tocar hardware ni credenciales)
-- Implementar el armazón de módulos:
-  - `core/audio_capture.py` (loopback de sistema con pausa/reanudar).
-  - `core/mic_input.py` (VAD + STT, con mute explícito).
-  - `core/vision_capture.py` (captura por monitor con toggle).
-- Crear endpoints locales (ej. `/vision/snapshot`, `/audio/toggle`, `/mic/toggle`) para controlar estados.
-- Añadir el estado global y flujos de “pausa audio” y “pausa visión”.
-- Integrar un bus interno para eventos (fast/deep brain) sin cambiar tu UX principal.
+### 1.7 — “Apolo Presence” (Presencia avanzada)
+- Gestos de hombros/brazos.
+- Micro-reacciones a errores/éxitos.
+- Cámara con planos especiales para explicaciones largas.
 
-### Lo que sí requiere tu intervención (por permisos o decisiones personales)
-- **Elegir tecnología de STT y wake word** (por privacidad/latencia):
-  - Local (recomendado para privacidad): Vosk/Whisper local + Porcupine.
-  - Cloud (más simple): APIs externas (necesitan claves).
-- **Permisos de audio y pantalla del SO** (Windows):
-  - Habilitar WASAPI loopback y permitir captura en segundo plano.
-  - Elegir si quieres capturar siempre o solo bajo demanda.
-- **Decidir política de privacidad**:
-  - ¿Guardar transcripciones? ¿Borrar automáticamente? ¿Ventana de retención?
-- **Definir frase de activación** (wake word).
-- **Confirmar apps sensibles** que jamás deben ser automatizadas.
-
----
-
-## 9) Plan fase a fase (para probar evolución)
-
-### Fase 1 (ya puedo empezar): Infraestructura de audio/visión + toggles
-Objetivo: JARVIS ve/escucha **pero con switches de privacidad**.
-- Implementar módulos de captura con “pause/resume”.
-- Estados globales: `audio_enabled`, `vision_enabled`, `mic_enabled`.
-- Endpoints locales para toggles.
-
-**Tu intervención**: seleccionar STT y wake word.
-
-### Fase 2: Wake word + STT en tiempo real
-Objetivo: activar pipeline de voz solo tras la frase de activación.
-- Integrar motor wake word.
-- Activar VAD + STT solo cuando hay wake word.
-
-**Tu intervención**: definir frase de activación y política de privacidad.
-
-### Fase 3: Dual-brain + memoria
-Objetivo: respuestas inmediatas + razonamiento profundo con continuidad.
-- Implementar fast/deep brain con bus interno.
-- Persistir memoria episódica y semántica.
-
-**Tu intervención**: decidir qué datos guardar y por cuánto tiempo.
+### 2.0 — “Olympus Prime” (Super Jarvis)
+- Integración completa de voz, avatar, memoria y multi-dispositivo.
+- Experiencia coherente con seguridad, privacidad y continuidad.
 
 ---
 
-## 10) Riesgos y mitigaciones
+## 5) Qué puedo implementar ahora mismo vs. qué requiere tu intervención
 
-- **Latencia perceptible** → usar fillers + reacciones instantáneas.
-- **Privacidad** → toggles claros, por defecto “OFF”.
-- **Complejidad** → construir módulos aislados e integrarlos gradualmente.
+### Lo que puedo hacer por mi cuenta
+- Refactor modular del backend (state machine + WS state events).
+- Mejoras en STT local (Whisper) y normalización de wake word.
+- Mejoras en el front del avatar (movimiento + cámara).
 
----
-
-## 11) Qué no hacer todavía
-- No habilitar grabación continua sin necesidad (privacidad).
-- No automatizar acciones destructivas sin confirmación.
-
----
-
-## 12) Conclusión
-
-Con estas fases, JARVIS evoluciona de un bot conversacional a un asistente con presencia real, con visión y audio del entorno, controlable y seguro. El plan mantiene coherencia con el repo actual, expandiéndolo de forma incremental sin romper su flujo base.
+### Lo que requiere tu intervención
+- Elección definitiva de STT/TTS (local vs cloud).
+- Credenciales para servicios externos (n8n, Calendar, Docs).
+- Políticas de privacidad y retención de datos.
