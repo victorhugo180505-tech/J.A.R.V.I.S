@@ -25,8 +25,8 @@ from core.stt_azure import AzureSpeechListener
 # Azure Speech (DEV LOCAL)
 # ===============================
 
-AZURE_KEY = "Chz8dWRlixoXUC8FBOwnvxO2DT2jsLqNV0Iu3UH6qV4RGvM9zuJnJQQJ99CAACYeBjFXJ3w3AAAYACOGtT0q"
-AZURE_REGION = "eastus"
+AZURE_KEY = AZURE_SPEECH_KEY
+AZURE_REGION = AZURE_SPEECH_REGION
 AZURE_VOICE = "es-MX-DaliaNeural"
 
 SYSTEM_PROMPT = """
