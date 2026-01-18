@@ -1,5 +1,10 @@
 from ai.deepseek import ask_deepseek
+from dotenv import load_dotenv
+load_dotenv(".env.local")  # carga ese archivo en os.environ
 import os
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
+
 import queue
 import re
 import threading
@@ -19,8 +24,7 @@ from core.stt_azure import AzureSpeechListener
 # ===============================
 # Azure Speech (DEV LOCAL)
 # ===============================
-AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY", "")
-AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "")
+
 AZURE_KEY = AZURE_SPEECH_KEY
 AZURE_REGION = AZURE_SPEECH_REGION
 AZURE_VOICE = "es-MX-DaliaNeural"
@@ -258,7 +262,7 @@ try:
         try:
             import winsound
 
-            winsound.Beep(880, 1000)
+            winsound.Beep(880, 500)
         except Exception:
             return
 
