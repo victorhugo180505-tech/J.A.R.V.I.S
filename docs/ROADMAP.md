@@ -21,14 +21,22 @@ Componentes principales:
   - Usa `GET /health` y `POST /mic/toggle` en el control server.
 
 - **Core Backend (Python)**
-  - `main.py` orquesta LLM → JSON → emoción/acción.
-  - Control server HTTP en `127.0.0.1:8780`:
-    - `/health`, `/state`, `/audio|mic|vision/toggle`, `/vision/snapshot`.
-  - STT:
-    - Azure (default) con `core/stt_azure.py`.
-    - Whisper local opcional con `core/stt_whisper.py`.
-  - TTS Azure con visemas (`core/azure_tts.py`).
-  - Memoria corta (`core/memory.py`).
+  - API HTTP (FastAPI o similar) en `127.0.0.1:8780`.
+  - WebSocket para sincronizar:
+    - visemas
+    - emociones
+    - estados de conversación
+  - STT Azure, TTS Azure (ya existente).
+  - Motor de conversación:
+    - `ConversationStateMachine`
+    - `LLMRouter` (cerebro tricapa).
+  - Tres cerebros (LLM providers):
+    - **DeepSeekFast** → respuestas rápidas y baratas (chat diario, Q&A simple).
+    - **DeepSeekPlanner** → razonamiento/planeación profunda (planes, análisis largos, diseño de sistemas).
+    - **OpenAIOracle** → opcional, solo para casos especiales: temas emocionales/sociales delicados, decisiones críticas, multimodal pesado.
+  - Memoria a corto y largo plazo:
+    - `MemoryStore` (conversación, hechos)
+    - `PeopleDB` (personas importantes, sin datos ultra sensibles).
 
 - **Avatar UI (Web/Tauri)**
   - WS server en `jarvis_avatar_web/server/ws_server.py` (puerto 8765).
@@ -144,17 +152,41 @@ Tareas:
 
 ---
 
-## 🧠 Versión 0.7 — “Prometeo Dock”
-**Objetivo:** Arquitectura limpia para el “cerebro” (LLM) con proveedor pluggable.
+## 🧠 Versión 0.7 — “Brain Dock (Tri-Mind)”
+**Objetivo:** Diseñar e implementar la arquitectura del “cerebro tricapa” con un `LLMRouter` y tres providers bien definidos.
 
-Tareas:
+### Cerebros
+
+- **DeepSeekFast** (`Brain A – Reflex Core`)
+  - Uso principal: respuestas rápidas, conversación diaria, Q&A ligero.
+  - Características: bajo costo, baja latencia.
+- **DeepSeekPlanner** (`Brain B – Planner Mind`)
+  - Uso principal: planeación de proyectos, razonamiento profundo, análisis largos, diseño de sistemas.
+  - Características: más costo por token, se usa solo cuando la tarea lo amerita.
+- **OpenAIOracle** (`Brain C – Oracle`)
+  - Uso principal: casos especiales (emocional/social delicado, decisiones críticas, multimodal avanzado).
+  - Características: más caro, activación opcional y controlada.
+
+### Tareas
+
 - Crear interfaz `LLMProvider`:
-  - métodos tipo `generate(messages, tools, ...)`.
-- Implementar:
-  - `DeepSeekProvider`
-  - `OpenAIProvider` (backup).
-- Config vía `.env.local` para elegir proveedor.
-- Encapsular llamadas LLM en módulo único.
+  - Métodos tipo `generate(messages, tools, ...)`.
+- Implementar providers concretos:
+  - `DeepSeekFastProvider`
+  - `DeepSeekPlannerProvider`
+  - `OpenAIOracleProvider` (puede ser desactivable vía configuración).
+- Crear un módulo `LLMRouter` que:
+  - Reciba: texto de entrada + contexto (estado de conversación, tipo de tarea, flags).
+  - Decida qué cerebro usar según reglas iniciales, por ejemplo:
+    - Preguntas cortas / chat rápido → `DeepSeekFast`.
+    - Peticiones de planeación / análisis largo → `DeepSeekPlanner`.
+    - Casos marcados como “profundos” o “sensibles” → `OpenAIOracle` (si está habilitado).
+  - Permita forzar un cerebro vía comandos del usuario (“usa modo profundo”, “usa cerebro rápido”).
+- Añadir configuración en `.env.local` para:
+  - claves de API de DeepSeek y OpenAI.
+  - nombres de modelos (fast/planner/oracle).
+  - un flag para habilitar/deshabilitar `OpenAIOracle`.
+- Asegurar que TODO el backend use el `LLMRouter` en vez de llamar directamente a un LLM específico.
 
 ---
 
