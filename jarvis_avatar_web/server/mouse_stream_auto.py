@@ -108,57 +108,82 @@ def normalize_mouse_relative_to_window_center(mouse_pt, rc):
     ny = -dy / ry
     return clamp(nx, -1.0, 1.0), clamp(ny, -1.0, 1.0)
 
-async def connect_and_stream(stop_event: threading.Event):
-    set_dpi_awareness()
-
+async def send_loop(ws, stop_event: threading.Event, verbose: bool):
     last_hwnd = None
     last_rect = None
     last_dbg = 0.0
     tick = 1.0 / FPS
 
     while not stop_event.is_set():
+        hwnd, title = find_best_window_by_title_contains(AVATAR_TITLE_CONTAINS)
+        if hwnd is None:
+            await ws.send(json.dumps({"type": "mouse", "x": IDLE_NDC[0], "y": IDLE_NDC[1]}, ensure_ascii=False))
+            await asyncio.sleep(0.25)
+            continue
+
+        if hwnd != last_hwnd:
+            last_hwnd = hwnd
+            if verbose:
+                print("🎭 Ventana avatar encontrada:", title)
+
+        rc = get_window_rect_dwm(hwnd)
+        if rc != last_rect:
+            last_rect = rc
+            if verbose:
+                print("🧩 Rect(DWM) avatar:", rc)
+
+        cx, cy = win32api.GetCursorPos()
+        nx, ny = normalize_mouse_relative_to_window_center((cx, cy), rc)
+
+        now = time.time()
+        if verbose and now - last_dbg > 3.0:
+            print(f"🖱️ cursor=({cx},{cy}) rect={rc} ndc=({nx:.3f},{ny:.3f})")
+            last_dbg = now
+
+        await ws.send(json.dumps({"type": "mouse", "x": nx, "y": ny}, ensure_ascii=False))
+        await asyncio.sleep(tick)
+
+
+async def recv_loop(ws, stop_event: threading.Event):
+    try:
+        async for _ in ws:
+            if stop_event.is_set():
+                break
+    except Exception:
+        raise
+
+
+async def connect_and_stream(stop_event: threading.Event, verbose: bool = True):
+    set_dpi_awareness()
+
+    while not stop_event.is_set():
         try:
             async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=20) as ws:
-                print("✅ mouse_stream_auto conectado:", WS_URL)
+                if verbose:
+                    print("✅ mouse_stream_auto conectado:", WS_URL)
 
-                while not stop_event.is_set():
-                    hwnd, title = find_best_window_by_title_contains(AVATAR_TITLE_CONTAINS)
-                    if hwnd is None:
-                        await ws.send(json.dumps({"type": "mouse", "x": IDLE_NDC[0], "y": IDLE_NDC[1]}, ensure_ascii=False))
-                        await asyncio.sleep(0.25)
-                        continue
+                sender = asyncio.create_task(send_loop(ws, stop_event, verbose))
+                receiver = asyncio.create_task(recv_loop(ws, stop_event))
 
-                    if hwnd != last_hwnd:
-                        last_hwnd = hwnd
-                        print("🎭 Ventana avatar encontrada:", title)
+                done, pending = await asyncio.wait(
+                    {sender, receiver},
+                    return_when=asyncio.FIRST_EXCEPTION
+                )
 
-                    rc = get_window_rect_dwm(hwnd)
-                    if rc != last_rect:
-                        last_rect = rc
-                        print("🧩 Rect(DWM) avatar:", rc)
-
-                    cx, cy = win32api.GetCursorPos()
-                    nx, ny = normalize_mouse_relative_to_window_center((cx, cy), rc)
-
-                    now = time.time()
-                    if now - last_dbg > 3.0:
-                        L, T, R, B = rc
-                        print(f"🖱️ cursor=({cx},{cy}) rect={rc} ndc=({nx:.3f},{ny:.3f})")
-                        last_dbg = now
-
-                    await ws.send(json.dumps({"type": "mouse", "x": nx, "y": ny}, ensure_ascii=False))
-                    await asyncio.sleep(tick)
+                for task in pending:
+                    task.cancel()
 
         except Exception as e:
-            print("❌ WS error / desconectado:", repr(e))
-            print("🔁 Reintentando en 1s...")
+            if verbose:
+                print("❌ WS error / desconectado:", repr(e))
+                print("🔁 Reintentando en 1s...")
             await asyncio.sleep(1.0)
 
-def start_mouse_stream_in_thread():
+def start_mouse_stream_in_thread(verbose: bool = True):
     stop_event = threading.Event()
 
     def runner():
-        asyncio.run(connect_and_stream(stop_event))
+        asyncio.run(connect_and_stream(stop_event, verbose=verbose))
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
