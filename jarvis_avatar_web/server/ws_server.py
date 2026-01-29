@@ -137,7 +137,8 @@ async def serve_ws(stop_event: threading.Event, with_console: bool = True):
             handle_ws,
             HOST,
             PORT,
-            max_size=2**23,     # ~8MB para TTS WAV base64
+            max_size=50*1024*1024,# 50MB
+            max_queue=32,
             ping_interval=20,
             ping_timeout=20,
             close_timeout=5,

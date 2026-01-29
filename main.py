@@ -1,10 +1,26 @@
-from ai.deepseek import ask_deepseek
+# ===============================
+# main.py (listo para pegar) ✅
+# - No borra nada: solo comenta DeepSeek y usa OpenAI OAuth (Codex CLI).
+# - Detecta "code" vs "general" automáticamente.
+# - Permite forzar modo con prefijos:
+#   - "/code ..."  -> task_type="code"
+#   - "/chat ..."  -> task_type="general"
+# - Imprime el modelo REAL usado (si openai_oauth soporta return_meta=True)
+# - Fallback anti-JSON roto: no crashea si el modelo contesta texto plano
+# - Opción B: si el JSON viene roto, hace 1 segunda llamada para "repair" a JSON válido
+# - Anti-crash WS 1009: limita el tamaño del audio_b64 antes de mandarlo por WS
+# ===============================
+
+# from ai.deepseek import ask_deepseek  # (comentado) DeepSeek ya no es el cerebro principal
+from ai.openai_oauth import ask_openai_oauth
+
 from dotenv import load_dotenv
 load_dotenv(".env.local")  # carga ese archivo en os.environ
 import os
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 
+import json
 import queue
 import re
 import threading
@@ -76,6 +92,7 @@ Usar SOLO para música.
 - No inventes acciones que no existan
 - No agregues campos extra
 - Sé conciso y natural en speech
+- Si preguntan “qué modelo usaste”, NO lo inventes: di que el router decide (general/code) y el modelo exacto se imprime en consola.
 """
 
 SUPPORTED_EMOTIONS = {
@@ -127,14 +144,162 @@ def start_local_servers():
 
     return stop_handles
 
-
 def normalize_text(text: str) -> str:
     return (text or "").strip()
 
+# ===============================
+# Routing: code vs general
+# ===============================
+
+CODE_HINTS = [
+    "error", "exception", "traceback", "stack", "stacktrace", "segfault", "core dumped",
+    "compile", "compila", "compilación", "linker", "undefined reference", "ld:",
+    "python", "c++", "cpp", "java", "javascript", "typescript", "node", "npm", "pip",
+    "leetcode", "codeforces", "icpc", "algoritmo", "complexity", "big-o", "dp", "graph",
+    "bug", "fix", "refactor", "regex", "sql", "api", "endpoint", "docker", "wsl",
+    "git", "github", "pr", "pull request", "commit",
+    "```", "class ", "def ", "import ", "#include", "int main", "std::", "public static",
+]
+
+def detect_task_type(user_text: str) -> str:
+    t = (user_text or "").strip()
+    low = t.lower()
+
+    if low.startswith("/code "):
+        return "code"
+    if low == "/code":
+        return "code"
+    if low.startswith("/chat "):
+        return "general"
+    if low == "/chat":
+        return "general"
+
+    for k in CODE_HINTS:
+        if k in low:
+            return "code"
+    return "general"
+
+def strip_force_prefix(user_text: str) -> str:
+    t = (user_text or "").strip()
+    low = t.lower()
+    if low.startswith("/code "):
+        return t[6:].strip()
+    if low.startswith("/chat "):
+        return t[6:].strip()
+    if low == "/code" or low == "/chat":
+        return ""
+    return user_text
+
+def _safe_print(s: str) -> None:
+    try:
+        print(s)
+    except Exception:
+        try:
+            print(s.encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
+        except Exception:
+            print(repr(s))
+
+# ===============================
+# Opción B: Repair a JSON válido
+# ===============================
+
+def _wrap_as_json_fallback(text: str) -> dict:
+    safe = (text or "").strip()
+    if not safe:
+        safe = "Lo siento, no pude interpretar la respuesta."
+    return {
+        "speech": safe[:800],
+        "emotion": "neutral",
+        "action": {"type": "none", "data": {}},
+    }
+
+def _build_json_repair_messages(system_prompt: str, user_text: str, bad_output: str, task_type: str) -> list:
+    repair_system = f"""
+Eres un "JSON repair bot" para JARVIS.
+
+Devuelve SOLO JSON válido (sin texto adicional, sin markdown, sin ```).
+Esquema exacto:
+{{
+  "speech": "string",
+  "emotion": "neutral | happy | sad | relaxed | surprised | angry | sarcastic | thinking | confident | tired | smug | annoyed | scared",
+  "action": {{
+    "type": "none | open_app | open_url | youtube_control | play_spotify",
+    "data": {{}}
+  }}
+}}
+
+Reglas:
+- Output: SOLO JSON.
+- No inventes campos.
+- Si el output original trae código o markdown, ponlo como texto dentro de "speech" (texto plano).
+- Si task_type == "code", action.type debe ser "none".
+"""
+
+    payload = {
+        "task_type": task_type,
+        "original_system_prompt": system_prompt,
+        "user_text": user_text,
+        "bad_output": bad_output,
+    }
+
+    return [
+        {"role": "system", "content": repair_system.strip()},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+def parse_or_repair_json(
+    raw_response: str,
+    *,
+    task_type: str,
+    system_prompt_used: str,
+    user_text: str,
+    ask_fn,
+    max_repairs: int = 1
+) -> dict:
+    # 1) intento normal
+    try:
+        return parse_response(raw_response)
+    except Exception as e:
+        first_err = e
+
+    # 2) repair
+    last_err = None
+    repaired_raw = None
+
+    for _ in range(max_repairs):
+        try:
+            repair_messages = _build_json_repair_messages(
+                system_prompt=system_prompt_used,
+                user_text=user_text,
+                bad_output=raw_response,
+                task_type=task_type,
+            )
+
+            # Repair SIEMPRE con "general" (más obediente al formato estricto)
+            repaired_raw = ask_fn(repair_messages, task_type="general")
+            return parse_response(repaired_raw)
+
+        except Exception as e:
+            last_err = e
+            continue
+
+    _safe_print(f"⚠️ JSON repair falló. first_err={first_err} last_err={last_err}")
+    return _wrap_as_json_fallback(repaired_raw if repaired_raw else raw_response)
+
+# ===============================
+# MAIN HANDLER
+# ===============================
 
 def handle_user_text(user_text: str):
     user_text = normalize_text(user_text)
     if not user_text:
+        return
+
+    task_type = detect_task_type(user_text)
+    user_text = strip_force_prefix(user_text)
+
+    if not user_text:
+        _safe_print("ℹ️ Modo cambiado. Escribe tu mensaje después de /code o /chat.")
         return
 
     add_message("user", user_text)
@@ -143,29 +308,37 @@ def handle_user_text(user_text: str):
     messages.extend(get_conversation())
 
     try:
-        raw_response = ask_deepseek(messages)
+        try:
+            raw_response, used_model = ask_openai_oauth(messages, task_type=task_type, return_meta=True)
+            _safe_print(f"[LLM] task={task_type} model={used_model}")
+        except TypeError:
+            raw_response = ask_openai_oauth(messages, task_type=task_type)
+            used_model = None
+            _safe_print(f"[LLM] task={task_type} model=(unknown)  (actualiza openai_oauth.py para return_meta=True)")
     except Exception as e:
-        print("⚠️ Error comunicándose con la IA:", e)
+        _safe_print(f"⚠️ Error comunicándose con la IA: {e}")
         return
 
-    try:
-        data = parse_response(raw_response)
-    except ValueError as e:
-        print("⚠️ Error parseando JSON:", e)
-        return
+    data = parse_or_repair_json(
+        raw_response,
+        task_type=task_type,
+        system_prompt_used=SYSTEM_PROMPT,
+        user_text=user_text,
+        ask_fn=ask_openai_oauth,
+        max_repairs=1,
+    )
 
     emo = normalize_emotion(data.get("emotion", "neutral"))
     speech = (data.get("speech", "") or "").strip()
     tts_text = prepare_tts_text(speech)
 
     add_message("assistant", speech)
-    print(f"Jarvis ({emo}): {speech}")
+    _safe_print(f"Jarvis [{task_type}] ({emo}): {speech}")
 
     # 1) mood persistente
     avatar.send_emotion(emo)
 
     # 2) TTS (Azure) -> WS type:"tts"
-    #    Import LAZY para que NO truene el programa si falta el SDK / estás en otro Python.
     if tts_text and have_azure_config():
         try:
             from core.azure_tts import synthesize_tts_with_visemes
@@ -180,38 +353,42 @@ def handle_user_text(user_text: str):
             if not audio_b64:
                 raise RuntimeError("Azure devolvió audio vacío (audio_b64='').")
 
-            print(f"[AZURE] OK audio_b64_len={len(audio_b64)} visemes={len(visemes)}")
+            _safe_print(f"[AZURE] OK audio_b64_len={len(audio_b64)} visemes={len(visemes)}")
 
-            # Requiere que AvatarWSClient tenga send_raw()
             if not hasattr(avatar, "send_raw"):
                 raise RuntimeError("AvatarWSClient no tiene send_raw(). Agrega send_raw() en avatar_ws_client.py")
 
-            avatar.send_raw({
-                "type": "tts",
-                "emotion": emo,
-                "audio_b64": audio_b64,
-                "visemes": visemes
-            })
-            print("[WS OUT] tts queued, bytes=", len(audio_b64))
-            print("[WS STATUS]", avatar.status())
+            # Anti-1009: limita payload grande
+            MAX_AUDIO_B64 = 900_000  # ~0.9MB para evitar frames >1MB
+            if len(audio_b64) > MAX_AUDIO_B64:
+                _safe_print("[TTS] audio demasiado grande -> fallback say (sin audio_b64)")
+                avatar.send_say(speech, emo)
+            else:
+                avatar.send_raw({
+                    "type": "tts",
+                    "emotion": emo,
+                    "audio_b64": audio_b64,
+                    "visemes": visemes
+                })
+                _safe_print("[WS OUT] tts queued, bytes=" + str(len(audio_b64)))
+                _safe_print("[WS STATUS] " + str(avatar.status()))
 
         except Exception as e:
-            print("[AZURE] FAIL -> fallback say:", repr(e))
+            _safe_print("[AZURE] FAIL -> fallback say: " + repr(e))
             avatar.send_say(speech, emo)
     else:
-        # Sin texto o sin config Azure
         if not tts_text:
-            print("[TTS] speech vacío -> no mando TTS.")
+            _safe_print("[TTS] speech vacío -> no mando TTS.")
         elif not have_azure_config():
-            print("[TTS] falta AZURE_KEY/AZURE_REGION -> fallback say.")
+            _safe_print("[TTS] falta AZURE_KEY/AZURE_REGION -> fallback say.")
         avatar.send_say(speech, emo)
 
     # 3) acción windows
     try:
         result = dispatch_action(data["action"])
-        print("✔", result)
+        _safe_print("✔ " + str(result))
     except Exception as e:
-        print("⚠️ Error ejecutando acción:", e)
+        _safe_print("⚠️ Error ejecutando acción: " + str(e))
 
 def stop_local_servers(stop_handles):
     bridge = stop_handles.get("http_bridge")
@@ -239,6 +416,7 @@ whisper_listener = AzureSpeechListener(
 )
 
 print("Jarvis iniciado. Escribe 'salir' para terminar.")
+print("Tip: fuerza modo con '/code ...' o '/chat ...'.")
 
 try:
     input_queue: "queue.Queue[str]" = queue.Queue()
@@ -261,7 +439,6 @@ try:
     def play_wake_beep():
         try:
             import winsound
-
             winsound.Beep(880, 500)
         except Exception:
             return
